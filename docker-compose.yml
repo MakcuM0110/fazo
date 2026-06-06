@@ -1,0 +1,45 @@
+services:
+
+  db:
+    image: postgres:16-alpine
+    container_name: fazo-db
+    environment:
+      POSTGRES_DB: fazo
+      POSTGRES_USER: fazo
+      POSTGRES_PASSWORD: fazo2024
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fazo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: ./api
+    container_name: fazo-api
+    environment:
+      DATABASE_URL: postgres://fazo:fazo2024@db:5432/fazo
+    volumes:
+      - imgdata:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build: .
+    container_name: fazo-web
+    ports:
+      - "8080:80"
+    volumes:
+      - imgdata:/usr/share/nginx/html/uploads
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  imgdata:
