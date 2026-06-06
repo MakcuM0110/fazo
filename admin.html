@@ -349,9 +349,23 @@ body::before {
   .toolbar-title { font-size: 1.3rem; }
 }
 
+
+/* ══ СТОЛЫ ═══════════════════════════════════════════════ */
+.tables-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 20px; }
+.table-card { background: var(--surface); border: 1px solid var(--border); padding: 24px; display: flex; flex-direction: column; gap: 14px; transition: border-color .25s; }
+.table-card:hover { border-color: var(--border2); }
+.table-card-name { font-family: 'Playfair Display', serif; font-size: 1.15rem; color: var(--cream); }
+.table-card-url { font-size: .72rem; color: var(--muted); word-break: break-all; }
+.table-card-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn-qr { background: rgba(201,147,58,.12); border: 1px solid var(--gold); color: var(--gold); padding: 7px 14px; font-size: .8rem; cursor: pointer; font-family: 'Cormorant Garamond', serif; transition: background .2s; }
+.btn-qr:hover { background: rgba(201,147,58,.25); }
+.btn-del-table { background: rgba(180,60,60,.12); border: 1px solid #b43c3c; color: #e07070; padding: 7px 14px; font-size: .8rem; cursor: pointer; font-family: 'Cormorant Garamond', serif; transition: background .2s; }
+.btn-del-table:hover { background: rgba(180,60,60,.25); }
+
 /* ══ АНИМАЦИИ ══════════════════════════════════════════════ */
 @keyframes fadeUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:none; } }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 </head>
 <body>
 
@@ -386,6 +400,7 @@ body::before {
     <div class="admin-header-sep"></div>
     <nav class="header-nav">
       <button class="header-nav-btn active" onclick="showTab('menu',this)"><span class="nav-label">🍽 Меню</span></button>
+      <button class="header-nav-btn" onclick="showTab('tables',this)"><span class="nav-label">🪑 Столы</span></button>
       <button class="header-nav-btn" onclick="showTab('stats',this)"><span class="nav-label">📊 Аналитика</span></button>
       <button class="header-nav-btn" onclick="showTab('settings',this)"><span class="nav-label">⚙️ Настройки</span></button>
     </nav>
@@ -422,6 +437,56 @@ body::before {
         </button>
       </div>
       <div class="dish-grid" id="dishGrid"></div>
+    </div>
+
+
+    <!-- ── СТОЛЫ ── -->
+    <div class="tab-page" id="tab-tables">
+      <div class="menu-toolbar" style="margin-bottom:28px">
+        <div class="toolbar-title"><span>Управление</span>Столы</div>
+        <div class="toolbar-sep"></div>
+        <button class="btn-add" onclick="openTableModal()">
+          <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Добавить стол
+        </button>
+      </div>
+      <div class="tables-grid" id="tablesGrid"></div>
+
+      <!-- Модалка добавления стола -->
+      <div class="modal-overlay" id="tableModalOverlay" onclick="closeTableModal()"></div>
+      <div class="modal" id="tableModal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:700;max-width:440px;width:92vw">
+        <div class="modal-header">
+          <span class="modal-title">Новый стол</span>
+          <button class="modal-close" onclick="closeTableModal()">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>Название / номер стола</label>
+            <input type="text" id="tableNameInput" placeholder="Например: Стол 1" maxlength="50"
+                   onkeydown="if(event.key==='Enter')saveTable()">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-cancel" onclick="closeTableModal()">Отмена</button>
+          <button class="btn-save" onclick="saveTable()">Добавить</button>
+        </div>
+      </div>
+
+      <!-- QR-модалка -->
+      <div class="modal-overlay" id="qrModalOverlay" onclick="closeQrModal()"></div>
+      <div class="modal" id="qrModal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:700;max-width:340px;width:92vw;text-align:center">
+        <div class="modal-header">
+          <span class="modal-title" id="qrModalTitle">QR-код</span>
+          <button class="modal-close" onclick="closeQrModal()">✕</button>
+        </div>
+        <div class="modal-body">
+          <div id="qrCodeBox" style="display:flex;justify-content:center;padding:16px 0"></div>
+          <div id="qrUrlText" style="font-size:.8rem;color:var(--muted);word-break:break-all;margin-top:8px"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-save" onclick="downloadQr()">Скачать PNG</button>
+        </div>
+      </div>
     </div>
 
     <!-- ── АНАЛИТИКА ── -->
@@ -1164,6 +1229,105 @@ async function importMenu(e) {
   reader.readAsText(file);
 }
 
+
+/* ════════════════════════════════════════════════════════
+   СТОЛЫ / QR
+   ════════════════════════════════════════════════════════ */
+const TABLE_BASE = 'https://fazo.ch-khana.ru/t/';
+
+async function loadTables() {
+  const grid = document.getElementById('tablesGrid');
+  grid.innerHTML = '<div style="color:var(--muted);font-style:italic">Загрузка...</div>';
+  try {
+    const tables = await apiGet('/api/tables');
+    if (!tables.length) {
+      grid.innerHTML = '<div style="color:var(--muted);font-style:italic;padding:40px 0">Столов пока нет. Нажмите «Добавить стол».</div>';
+      return;
+    }
+    grid.innerHTML = '';
+    tables.forEach(t => grid.appendChild(makeTableCard(t)));
+  } catch(e) {
+    grid.innerHTML = '<div style="color:#e07070">Ошибка загрузки: ' + e.message + '</div>';
+  }
+}
+
+function makeTableCard(t) {
+  const url = TABLE_BASE + t.token;
+  const div = document.createElement('div');
+  div.className = 'table-card';
+  div.innerHTML = `
+    <div class="table-card-name">🪑 ${escHtml(t.name)}</div>
+    <div class="table-card-url">${url}</div>
+    <div class="table-card-actions">
+      <button class="btn-qr" onclick="showQr(${t.id},'${escHtml(t.name)}','${t.token}')">QR-код</button>
+      <button class="btn-del-table" onclick="deleteTable(${t.id})">Удалить</button>
+    </div>`;
+  return div;
+}
+
+function openTableModal() {
+  document.getElementById('tableNameInput').value = '';
+  document.getElementById('tableModalOverlay').style.display = 'block';
+  document.getElementById('tableModal').style.display = 'flex';
+  setTimeout(() => document.getElementById('tableNameInput').focus(), 50);
+}
+
+function closeTableModal() {
+  document.getElementById('tableModalOverlay').style.display = '';
+  document.getElementById('tableModal').style.display = 'none';
+}
+
+async function saveTable() {
+  const name = document.getElementById('tableNameInput').value.trim();
+  if (!name) { showToast('Введите название стола', true); return; }
+  try {
+    await apiPost('/api/tables', { name });
+    closeTableModal();
+    showToast('Стол добавлен');
+    loadTables();
+  } catch(e) { showToast('Ошибка: ' + e.message, true); }
+}
+
+async function deleteTable(id) {
+  if (!confirm('Удалить стол?')) return;
+  try {
+    await apiDelete('/api/tables/' + id);
+    showToast('Стол удалён');
+    loadTables();
+  } catch(e) { showToast('Ошибка: ' + e.message, true); }
+}
+
+let _qrInstance = null;
+function showQr(id, name, token) {
+  const url = TABLE_BASE + token;
+  document.getElementById('qrModalTitle').textContent = 'QR — ' + name;
+  document.getElementById('qrUrlText').textContent = url;
+  const box = document.getElementById('qrCodeBox');
+  box.innerHTML = '';
+  _qrInstance = new QRCode(box, { text: url, width: 220, height: 220, correctLevel: QRCode.CorrectLevel.M });
+  document.getElementById('qrModalOverlay').style.display = 'block';
+  document.getElementById('qrModal').style.display = 'flex';
+}
+
+function closeQrModal() {
+  document.getElementById('qrModalOverlay').style.display = '';
+  document.getElementById('qrModal').style.display = 'none';
+  _qrInstance = null;
+}
+
+function downloadQr() {
+  const canvas = document.querySelector('#qrCodeBox canvas');
+  if (!canvas) return;
+  const a = document.createElement('a');
+  a.href = canvas.toDataURL('image/png');
+  a.download = 'table-qr.png';
+  a.click();
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
 /* ════════════════════════════════════════════════════════
    ВКЛАДКИ
    ════════════════════════════════════════════════════════ */
@@ -1173,6 +1337,7 @@ function showTab(name, btn) {
   document.getElementById('tab-' + name).classList.add('active');
   btn.classList.add('active');
   if (name === 'menu') renderDishes();
+  if (name === 'tables') loadTables();
 }
 
 /* ════════════════════════════════════════════════════════
